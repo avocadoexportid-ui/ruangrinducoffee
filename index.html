@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ruang Rindu Coffee - POS & App</title>
+    
+    <!-- Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons: Lucide React (Vanilla Version) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#4A5D23', // Hijau Tua Ruang Rindu
+                        secondary: '#F8F9FA', // Background Abu Muda
+                        border: '#E5E7EB',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #F8F9FA;
+            color: #1F2937;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+        /* Mobile Frame Simulation */
+        .mobile-frame {
+            max-width: 480px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.05);
+            position: relative;
+            border-left: 1px solid #E5E7EB;
+            border-right: 1px solid #E5E7EB;
+        }
+
+        /* Animations */
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        .slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="antialiased h-screen overflow-hidden flex flex-col">
+
+    <!-- MAIN CONTAINER -->
+    <main id="root" class="flex-1 h-full overflow-hidden bg-gray-50">
+        <!-- Content injected by JS -->
+    </main>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // ==========================================
+        // 1. MOCK DATA & UTILITIES
+        // ==========================================
+
+        const PRODUCTS = [
+            { id: 1, name: "Kopi Susu Gula Aren", category: "coffee", price: 22000, image: "https://picsum.photos/seed/kopi1/300/300", desc: "Espresso house blend dengan susu segar.", sizes: [{name: 'Regular', price: 0}, {name: 'Large', price: 5000}] },
+            { id: 2, name: "Americano", category: "coffee", price: 18000, image: "https://picsum.photos/seed/kopi2/300/300", desc: "Double shot espresso dengan air murni.", sizes: [{name: 'Hot', price: 0}, {name: 'Ice', price: 2000}] },
+            { id: 3, name: "Caramel Macchiato", category: "coffee", price: 28000, image: "https://picsum.photos/seed/kopi3/300/300", desc: "Vanilla syrup, steamed milk, caramel.", sizes: [{name: 'Regular', price: 0}, {name: 'Large', price: 5000}] },
+            { id: 4, name: "Matcha Latte", category: "non-coffee", price: 26000, image: "https://picsum.photos/seed/matcha/300/300", desc: "Premium matcha dengan creamy oat milk.", sizes: [{name: 'Regular', price: 0}, {name: 'Large', price: 5000}] },
+            { id: 5, name: "Croissant", category: "food", price: 15000, image: "https://picsum.photos/seed/roti/300/300", desc: "Pastry renyah dengan butter premium.", sizes: [] },
+        ];
+
+        const ADDONS = [
+            { id: 'sugar', name: 'Extra Gula', price: 2000 },
+            { id: 'shot', name: 'Extra Shot', price: 5000 },
+            { id: 'ice', name: 'Less Ice', price: 0 },
+        ];
+
+        const formatRupiah = (number) => {
+            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number);
+        };
+
+        // ==========================================
+        // 2. STATE MANAGEMENT (Zustand Simulation)
+        // ==========================================
+
+        const store = {
+            state: {
+                view: 'login', // 'login', 'customer_home', 'customer_cart', 'pos', 'dashboard'
+                user: null, // { name: string, role: 'customer' | 'kasir' }
+                authTab: 'customer', // Tab active di halaman login
+                authError: '',
+                
+                cart: [],
+                activeModal: null, // 'product', 'payment', 'receipt'
+                selectedProduct: null,
+                tempConfig: { size: null, addons: [] },
+                paymentMethod: 'cash',
+                cashGiven: 0,
+                orderHistory: []
+            },
+            listeners: new Set(),
+            
+            getState() { return this.state; },
+            
+            setState(newState) {
+                this.state = { ...this.state, ...newState };
+                this.notify();
+            },
+
+            subscribe(listener) {
+                this.listeners.add(listener);
+                return () => this.listeners.delete(listener);
+            },
+
+            notify() {
+                this.listeners.forEach(listener => listener(this.state));
+                render();
+            },
+            
+            // Auth Actions
+            setAuthTab(tab) { this.setState({ authTab: tab, authError: '' }); },
+            
+            handleLogin(role, username, password) {
+                if (role === 'customer') {
+                    if (!username) {
+                        this.setState({ authError: 'Mohon isi nama Anda' });
+                        return;
+                    }
+                    this.setState({ 
+                        user: { name: username, role: 'customer' }, 
+                        view: 'customer_home',
+                        cart: [] // Reset cart on new login
+                    });
+                } else if (role === 'kasir') {
+                    // Mock Validation: Admin / Admin
+                    if (username === 'admin' && password === 'admin') {
+                        this.setState({ 
+                            user: { name: 'Staff Kasir', role: 'kasir' }, 
+                            view: 'pos',
+                            cart: []
+                        });
+                    } else {
+                        this.setState({ authError: 'Username atau Password salah! (Coba: admin/admin)' });
+                    }
+                }
+            },
+
+            logout() {
+                this.setState({ 
+                    user: null, 
+                    view: 'login', 
+                    cart: [],
+                    activeModal: null,
+                    orderHistory: [] // Reset history for demo
+                });
+            },
+            
+            // Cart Actions
+            addToCart(product, config, finalPrice) {
+                const existing = this.state.cart.find(item => 
+                    item.id === product.id && 
+                    JSON.stringify(item.config) === JSON.stringify(config)
+                );
+                let newCart;
+                if (existing) {
+                    newCart = this.state.cart.map(item => 
+                        item === existing ? { ...item, qty: item.qty + 1 } : item
+                    );
+                } else {
+                    newCart = [...this.state.cart, { 
+                        ...product, cartId: Date.now(), qty: 1, config, finalPrice 
+                    }];
+                }
+                this.setState({ cart: newCart, activeModal: null });
+            },
+            removeFromCart(cartId) {
+                const newCart = this.state.cart.filter(item => item.cartId !== cartId);
+                this.setState({ cart: newCart });
+            },
+            updateQty(cartId, delta) {
+                const newCart = this.state.cart.map(item => {
+                    if (item.cartId === cartId) return { ...item, qty: Math.max(1, item.qty + delta) };
+                    return item;
+                });
+                this.setState({ cart: newCart });
+            },
+            processPayment() {
+                const subtotal = this.state.cart.reduce((sum, i) => sum + (i.finalPrice * i.qty), 0);
+                const tax = subtotal * 0.1;
+                const total = subtotal + tax;
+                if (this.state.paymentMethod === 'cash' && this.state.cashGiven < total) {
+                    alert("Uang tunai kurang!");
+                    return;
+                }
+                const newOrder = {
+                    id: `ORD-${Math.floor(Math.random() * 10000)}`,
+                    date: new Date(),
+                    items: [...this.state.cart],
+                    total: total,
+                    method: this.state.paymentMethod
+                };
+                this.setState({
+                    orderHistory: [newOrder, ...this.state.orderHistory],
+                    cart: [],
+                    activeModal: 'receipt'
+                });
+            }
+        };
+
+        // ==========================================
+        // 3. UI COMPONENTS
+        // ==========================================
+
+        // --- A. LOGIN PAGE ---
+        const LoginPage = () => {
+            const isCustomer = store.state.authTab === 'customer';
+            
+            return `
+            <div class="h-full flex items-center justify-center bg-secondary p-4 fade-in">
+                <div class="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden">
+                    <!-- Header Logo -->
+                    <div class="bg-primary p-8 text-center text-white relative overflow-hidden">
+                        <div class="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-4 text-white">
+                            <i data-lucide="coffee" class="w-8 h-8"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold">Ruang Rindu Coffee</h2>
+                        <p class="text-green-100 text-sm mt-1">Selamat Datang Kembali</p>
+                        <i data-lucide="bean" class="absolute -right-6 -bottom-6 w-24 h-24 text-white opacity-10"></i>
+                    </div>
+
+                    <!-- Login Form -->
+                    <div class="p-8">
+                        <!-- Tab Switcher -->
+                        <div class="flex bg-gray-100 p-1 rounded-lg mb-6">
+                            <button onclick="store.setAuthTab('customer')" 
+                                class="flex-1 py-2 rounded-md text-sm font-medium transition-all ${isCustomer ? 'bg-white shadow-sm text-primary' : 'text-gray-500 hover:text-gray-900'}">
+                                Customer
+                            </button>
+                            <button onclick="store.setAuthTab('kasir')" 
+                                class="flex-1 py-2 rounded-md text-sm font-medium transition-all ${!isCustomer ? 'bg-white shadow-sm text-primary' : 'text-gray-500 hover:text-gray-900'}">
+                                Staff Kasir
+                            </button>
+                        </div>
+
+                        <!-- Form Inputs -->
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">
+                                    ${isCustomer ? 'Nama' : 'Username'}
+                                </label>
+                                <div class="relative">
+                                    <i data-lucide="${isCustomer ? 'user' : 'shield'}" class="absolute left-3 top-3 w-5 h-5 text-gray-400"></i>
+                                    <input id="login-user" type="text" placeholder="${isCustomer ? 'Masukkan nama Anda' : 'Masukkan username'}" 
+                                        class="w-full bg-gray-50 border border-gray-200 py-2.5 pl-10 pr-4 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all">
+                                </div>
+                            </div>
+
+                            ${!isCustomer ? `
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Password</label>
+                                <div class="relative">
+                                    <i data-lucide="lock" class="absolute left-3 top-3 w-5 h-5 text-gray-400"></i>
+                                    <input id="login-pass" type="password" placeholder="Masukkan password" 
+                                        class="w-full bg-gray-50 border border-gray-200 py-2.5 pl-10 pr-4 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all">
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-1">*Demo: username 'admin', password 'admin'</p>
+                            </div>
+                            ` : ''}
+                            
+                            ${store.state.authError ? `
+                            <div class="p-3 bg-red-50 text-red-600 text-xs rounded-lg flex items-center gap-2">
+                                <i data-lucide="alert-circle" class="w-4 h-4"></i> ${store.state.authError}
+                            </div>
+                            ` : ''}
+                        </div>
+
+                        <button onclick="handleLoginSubmit()" class="w-full bg-primary hover:bg-green-800 text-white py-3 rounded-xl font-bold shadow-lg shadow-green-900/20 transition-all mt-6 flex items-center justify-center gap-2">
+                            <span>Masuk</span> <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            `;
+        };
+
+        // Helper for Login Button
+        window.handleLoginSubmit = () => {
+            const user = document.getElementById('login-user').value;
+            const pass = document.getElementById('login-pass') ? document.getElementById('login-pass').value : '';
+            store.handleLogin(store.state.authTab, user, pass);
+        };
+
+        // --- B. CUSTOMER HOME ---
+        const CustomerHome = () => `
+            <div class="mobile-frame h-full flex flex-col pb-24 overflow-y-auto relative">
+                <!-- Header with Logout -->
+                <div class="p-4 bg-white sticky top-0 z-10 shadow-sm flex justify-between items-center mb-2">
+                    <div>
+                        <p class="text-xs text-gray-500">Halo,</p>
+                        <h1 class="text-xl font-bold text-gray-800">${store.state.user.name}</h1>
+                    </div>
+                    <button onclick="store.logout()" class="text-gray-400 hover:text-red-500 transition-colors">
+                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+                <div class="p-4">
+                    <!-- Search -->
+                    <div class="relative mb-6">
+                        <i data-lucide="search" class="absolute left-3 top-3 w-4 h-4 text-gray-400"></i>
+                        <input type="text" placeholder="Cari kopi favorit..." class="w-full bg-gray-100 py-2.5 pl-10 pr-4 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                    </div>
+
+                    <!-- Categories -->
+                    <div class="flex gap-3 mb-6 overflow-x-auto scrollbar-hide">
+                        ${['Semua', 'Kopi', 'Non-Coffee', 'Snack'].map((c, i) => `
+                            <button class="px-4 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${i===0 ? 'bg-primary text-white' : 'bg-white border text-gray-600'}">
+                                ${c}
+                            </button>
+                        `).join('')}
+                    </div>
+
+                    <!-- Product Grid -->
+                    <div class="grid grid-cols-2 gap-4">
+                        ${PRODUCTS.map(p => `
+                            <div onclick="openProduct(${p.id})" class="bg-white p-3 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+                                <img src="${p.image}" class="w-full h-32 object-cover rounded-lg mb-3 bg-gray-100">
+                                <h3 class="font-bold text-sm text-gray-800 truncate">${p.name}</h3>
+                                <p class="text-xs text-gray-500 truncate mb-2">${p.desc}</p>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-primary font-bold text-sm">${formatRupiah(p.price)}</span>
+                                    <div class="bg-primary/10 p-1.5 rounded-lg text-primary">
+                                        <i data-lucide="plus" class="w-3 h-3"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="fixed bottom-4 left-0 w-full flex justify-center z-20 pointer-events-none">
+                    <button onclick="store.setState({view: 'customer_cart'})" class="pointer-events-auto bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 hover:scale-105 transition-transform">
+                        <div class="relative">
+                            <i data-lucide="shopping-bag" class="w-5 h-5"></i>
+                            <span class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">${store.state.cart.length}</span>
+                        </div>
+                        <span class="font-bold text-sm">Lihat Keranjang</span>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // --- C. CUSTOMER CART ---
+        const CustomerCart = () => {
+            const subtotal = store.state.cart.reduce((s, i) => s + (i.finalPrice * i.qty), 0);
+            const total = subtotal + (subtotal * 0.1);
+
+            return `
+            <div class="mobile-frame h-full flex flex-col bg-white z-30">
+                <div class="p-4 border-b border-border flex items-center gap-3 bg-white">
+                    <button onclick="store.setState({view: 'customer_home'})" class="p-2 -ml-2"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+                    <h2 class="font-bold text-lg">Pesanan Saya</h2>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                    ${store.state.cart.length === 0 ? `
+                        <div class="text-center text-gray-400 mt-10">
+                            <i data-lucide="shopping-cart" class="w-16 h-16 mx-auto mb-4 opacity-20"></i>
+                            <p>Keranjang kosong</p>
+                        </div>
+                    ` : store.state.cart.map(item => `
+                        <div class="flex gap-3 items-center border border-gray-100 p-2 rounded-xl">
+                            <img src="${item.image}" class="w-16 h-16 rounded-lg object-cover bg-gray-100">
+                            <div class="flex-1">
+                                <h3 class="font-bold text-sm text-gray-800">${item.name}</h3>
+                                <div class="text-xs text-gray-500 mb-1">${item.config.size} ${item.config.addons.map(a => a.name).join(', ')}</div>
+                                <div class="font-bold text-primary text-sm">${formatRupiah(item.finalPrice)}</div>
+                            </div>
+                            <div class="flex flex-col items-end gap-2">
+                                <button onclick="store.removeFromCart(${item.cartId})" class="text-red-400 text-xs"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                                <div class="flex items-center gap-2 bg-gray-50 rounded-lg p-1">
+                                    <button onclick="store.updateQty(${item.cartId}, -1)" class="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm">-</button>
+                                    <span class="text-xs font-bold w-3 text-center">${item.qty}</span>
+                                    <button onclick="store.updateQty(${item.cartId}, 1)" class="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm">+</button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                ${store.state.cart.length > 0 ? `
+                <div class="p-4 border-t border-border bg-gray-50 rounded-t-2xl shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+                    <div class="flex justify-between mb-4 text-xl font-bold text-gray-800">
+                        <span>Total</span>
+                        <span class="text-primary">${formatRupiah(total)}</span>
+                    </div>
+                    <button onclick="openPaymentModal()" class="w-full bg-primary text-white py-3.5 rounded-xl font-bold shadow-lg shadow-green-900/20 active:scale-95 transition-transform">
+                        Lanjut Pembayaran
+                    </button>
+                </div>
+                ` : ''}
+            </div>
+            `;
+        };
+
+        // --- D. POS LAYOUT (Desktop) ---
+        const POSLayout = () => {
+            const subtotal = store.state.cart.reduce((s, i) => s + (i.finalPrice * i.qty), 0);
+            const total = subtotal + (subtotal * 0.1);
+
+            return `
+            <div class="h-full flex overflow-hidden bg-gray-50">
+                <!-- Product Grid -->
+                <div class="flex-1 flex flex-col h-full overflow-hidden">
+                    <div class="h-16 border-b border-border bg-white flex items-center px-6 justify-between shadow-sm">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white"><i data-lucide="coffee" class="w-5 h-5"></i></div>
+                            <h1 class="font-bold text-xl text-gray-800">Ruang Rindu POS</h1>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-sm text-gray-500 font-medium">Kasir: <span class="text-primary">${store.state.user.name}</span></span>
+                            <button onclick="store.setState({view: 'dashboard'})" class="text-sm font-medium text-gray-500 hover:text-primary flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors">
+                                <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+                            </button>
+                            <button onclick="store.logout()" class="text-sm font-medium text-red-500 hover:text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                                <i data-lucide="log-out" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto bg-gray-50 pb-20">
+                         ${PRODUCTS.map(p => `
+                            <div onclick="openProduct(${p.id})" class="bg-white p-4 rounded-xl border border-border shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer h-full flex flex-col group">
+                                <img src="${p.image}" class="w-full h-32 object-cover rounded-lg mb-4 bg-gray-100 group-hover:scale-105 transition-transform">
+                                <div class="flex-1">
+                                    <h3 class="font-bold text-gray-800">${p.name}</h3>
+                                    <p class="text-xs text-gray-500 line-clamp-2 mt-1">${p.desc}</p>
+                                </div>
+                                <div class="flex justify-between items-center mt-3">
+                                    <span class="text-primary font-bold">${formatRupiah(p.price)}</span>
+                                    <div class="bg-primary/10 p-2 rounded-lg text-primary group-hover:bg-primary group-hover:text-white transition-colors">
+                                        <i data-lucide="plus" class="w-4 h-4"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <!-- Cart Sidebar -->
+                <div class="w-96 bg-white border-l border-border flex flex-col h-full shadow-xl z-20">
+                    <div class="p-5 border-b border-border">
+                        <h2 class="font-bold text-lg">Order Baru #001</h2>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-4 space-y-3">
+                        ${store.state.cart.length === 0 ? `
+                            <div class="flex flex-col items-center justify-center h-full text-gray-300">
+                                <i data-lucide="shopping-basket" class="w-12 h-12 mb-2"></i>
+                                <span class="text-sm">Keranjang Kosong</span>
+                            </div>
+                        ` : store.state.cart.map(item => `
+                            <div class="flex justify-between items-start bg-gray-50 p-3 rounded-lg border border-border">
+                                <div>
+                                    <h4 class="font-bold text-sm text-gray-800">${item.name}</h4>
+                                    <p class="text-xs text-gray-500">${item.config.size} • ${item.config.addons.map(a=>a.name).join(', ')}</p>
+                                    <span class="text-sm font-bold text-primary">${formatRupiah(item.finalPrice)}</span>
+                                </div>
+                                <div class="flex items-center gap-2 bg-white rounded border border-gray-200 p-1">
+                                    <button onclick="store.updateQty(${item.cartId}, -1)" class="w-6 h-6 flex items-center justify-center text-gray-600 hover:text-red-500">-</button>
+                                    <span class="text-xs font-bold w-4 text-center">${item.qty}</span>
+                                    <button onclick="store.updateQty(${item.cartId}, 1)" class="w-6 h-6 flex items-center justify-center text-gray-600 hover:text-primary">+</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="p-5 bg-gray-50 border-t border-border">
+                        <div class="flex justify-between mb-4 text-xl font-bold text-gray-900">
+                            <span>Total</span>
+                            <span class="text-primary">${formatRupiah(total)}</span>
+                        </div>
+                        <button onclick="openPaymentModal()" ${store.state.cart.length === 0 ? 'disabled' : ''} class="w-full bg-primary text-white py-3 rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-800 transition-colors">
+                            Bayar Sekarang
+                        </button>
+                    </div>
+                </div>
+            </div>
+            `;
+        };
+
+        // --- E. DASHBOARD KASIR ---
+        const Dashboard = () => {
+            const history = store.state.orderHistory;
+            const totalSales = history.reduce((acc, ord) => acc + ord.total, 0);
+
+            return `
+            <div class="max-w-5xl mx-auto p-8 h-full overflow-y-auto">
+                <div class="flex justify-between items-center mb-8">
+                    <h1 class="text-2xl font-bold text-gray-800">Dashboard Kasir</h1>
+                    <button onclick="store.setState({view: 'pos'})" class="bg-white border px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 shadow-sm">
+                        <i data-lucide="arrow-left" class="inline w-4 h-4 mr-1"></i> Kembali ke POS
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white p-6 rounded-xl border border-border shadow-sm">
+                        <div class="text-gray-500 text-sm mb-1">Total Penjualan</div>
+                        <div class="text-3xl font-bold text-primary">${formatRupiah(totalSales)}</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl border border-border shadow-sm">
+                        <div class="text-gray-500 text-sm mb-1">Jumlah Order</div>
+                        <div class="text-3xl font-bold text-gray-800">${history.length}</div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-border bg-gray-50 flex justify-between items-center">
+                        <h3 class="font-bold text-gray-800">Riwayat Transaksi</h3>
+                        <button onclick="store.logout()" class="text-xs text-red-500 hover:underline">Logout</button>
+                    </div>
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-gray-50 text-gray-500">
+                            <tr>
+                                <th class="px-6 py-3">Order ID</th>
+                                <th class="px-6 py-3">Waktu</th>
+                                <th class="px-6 py-3">Metode</th>
+                                <th class="px-6 py-3">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${history.length === 0 ? `<tr><td colspan="4" class="p-6 text-center text-gray-400">Belum ada data</td></tr>` : history.map(ord => `
+                                <tr class="border-b border-border last:border-0">
+                                    <td class="px-6 py-3 font-medium">${ord.id}</td>
+                                    <td class="px-6 py-3 text-gray-500">${ord.date.toLocaleTimeString()}</td>
+                                    <td class="px-6 py-3 capitalize"><span class="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold">${ord.method}</span></td>
+                                    <td class="px-6 py-3 font-bold text-gray-800">${formatRupiah(ord.total)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            `;
+        };
+
+        // --- MODALS ---
+
+        const Modals = () => {
+            const state = store.state;
+            let modalContent = '';
+
+            if (state.activeModal === 'product' && state.selectedProduct) {
+                const p = state.selectedProduct;
+                let price = p.price;
+                if (state.tempConfig.size) {
+                    const sizeObj = p.sizes.find(s => s.name === state.tempConfig.size);
+                    if (sizeObj) price += sizeObj.price;
+                }
+                state.tempConfig.addons.forEach(a => price += a.price);
+
+                modalContent = `
+                <div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm fade-in" onclick="store.setState({activeModal: null})">
+                    <div class="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl slide-up" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-start mb-4">
+                            <img src="${p.image}" class="w-20 h-20 rounded-lg object-cover bg-gray-100">
+                            <div class="flex-1 ml-4">
+                                <h2 class="text-xl font-bold text-gray-800">${p.name}</h2>
+                                <p class="text-gray-500 text-sm mt-1">${p.desc}</p>
+                                <h3 class="text-lg font-bold text-primary mt-2">${formatRupiah(price)}</h3>
+                            </div>
+                            <button onclick="store.setState({activeModal: null})" class="text-gray-400"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        ${p.sizes.length > 0 ? `
+                        <div class="mb-4">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Ukuran</label>
+                            <div class="flex gap-2">
+                                ${p.sizes.map(s => `
+                                    <button onclick="selectSize('${s.name}')" class="flex-1 py-2 rounded-lg border text-sm font-medium ${state.tempConfig.size === s.name ? 'border-primary bg-primary/5 text-primary' : 'border-gray-200 text-gray-600'}">
+                                        ${s.name} ${s.price > 0 ? `(+${formatRupiah(s.price)})` : ''}
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        <div class="mb-6">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Tambahan</label>
+                            <div class="flex flex-wrap gap-2">
+                                ${ADDONS.map(a => `
+                                    <button onclick="toggleAddon(${a.id}, '${a.name}', ${a.price})" class="px-3 py-2 rounded-lg border text-sm font-medium ${state.tempConfig.addons.find(ad => ad.id === a.id) ? 'border-primary bg-primary text-white' : 'border-gray-200 text-gray-600'}">
+                                        ${a.name} (+${formatRupiah(a.price)})
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                        <button onclick="store.addToCart(PRODUCTS.find(x => x.id === ${p.id}), store.state.tempConfig, ${price})" class="w-full bg-primary text-white py-3 rounded-xl font-bold shadow-lg hover:bg-green-800 transition-all">
+                            Tambah ke Keranjang
+                        </button>
+                    </div>
+                </div>`;
+            } else if (state.activeModal === 'payment') {
+                const subtotal = state.cart.reduce((s, i) => s + (i.finalPrice * i.qty), 0);
+                const total = subtotal + (subtotal * 0.1);
+                const change = state.cashGiven - total;
+
+                modalContent = `
+                <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm fade-in" onclick="store.setState({activeModal: null})">
+                    <div class="bg-white w-full max-w-lg rounded-2xl p-6 shadow-2xl slide-up" onclick="event.stopPropagation()">
+                        <h2 class="text-xl font-bold mb-6 text-center">Pembayaran</h2>
+                        <div class="bg-green-50 p-4 rounded-xl text-center mb-6">
+                            <p class="text-sm text-green-700 font-medium">Total Tagihan</p>
+                            <p class="text-3xl font-bold text-green-800">${formatRupiah(total)}</p>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 mb-6">
+                            ${['cash', 'qris', 'debit'].map(m => `
+                                <button onclick="store.setState({paymentMethod: '${m}'})" class="flex flex-col items-center gap-2 p-3 rounded-xl border-2 ${state.paymentMethod === m ? 'border-primary bg-primary/5' : 'border-gray-200'}">
+                                    <i data-lucide="${m === 'cash' ? 'banknote' : m === 'qris' ? 'qr-code' : 'credit-card'}" class="w-6 h-6 ${state.paymentMethod === m ? 'text-primary' : 'text-gray-400'}"></i>
+                                    <span class="text-xs font-bold capitalize ${state.paymentMethod === m ? 'text-primary' : 'text-gray-600'}">${m}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                        ${state.paymentMethod === 'cash' ? `
+                            <div class="space-y-3">
+                                <label class="block text-sm font-bold text-gray-700">Uang Diterima</label>
+                                <input type="number" value="${state.cashGiven || ''}" oninput="store.setState({cashGiven: this.value})" class="w-full p-3 bg-gray-50 border border-border rounded-xl text-right text-lg font-bold focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="0">
+                                <div class="grid grid-cols-4 gap-2">
+                                    ${[10000, 20000, 50000, 100000].map(n => `
+                                        <button onclick="store.setState({cashGiven: ${n}})" class="py-2 bg-white border rounded-lg text-xs font-bold hover:bg-gray-50">${(n/1000)}k</button>
+                                    `).join('')}
+                                </div>
+                                ${state.cashGiven >= total ? `
+                                    <div class="flex justify-between items-center p-3 bg-green-50 rounded-xl">
+                                        <span class="text-green-800 font-bold">Kembalian</span>
+                                        <span class="text-green-700 font-bold text-lg">${formatRupiah(change)}</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : `
+                            <div class="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                                <i data-lucide="scan-face" class="w-10 h-10 mx-auto mb-2 opacity-50"></i>
+                                <p class="text-sm">Menunggu pembayaran ${state.paymentMethod}...</p>
+                            </div>
+                        `}
+                        <div class="mt-6 flex gap-3">
+                            <button onclick="store.setState({activeModal: null})" class="flex-1 py-3 border border-gray-300 rounded-xl font-bold text-gray-600">Batal</button>
+                            <button onclick="store.processPayment()" class="flex-1 py-3 bg-primary text-white rounded-xl font-bold shadow-lg hover:bg-green-800">Bayar</button>
+                        </div>
+                    </div>
+                </div>`;
+            } else if (state.activeModal === 'receipt') {
+                const lastOrder = state.orderHistory[0];
+                modalContent = `
+                <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm fade-in">
+                    <div class="bg-white w-full max-w-sm rounded-2xl p-6 text-center shadow-2xl slide-up">
+                        <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 text-green-600">
+                            <i data-lucide="check" class="w-8 h-8"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-1">Pembayaran Berhasil!</h2>
+                        <p class="text-gray-500 text-sm mb-6">Terima kasih, pesanan sedang disiapkan.</p>
+                        <div class="border border-dashed border-gray-300 p-4 rounded-xl text-left text-sm mb-6 bg-gray-50">
+                            <div class="flex justify-between mb-1"><span class="text-gray-500">ID Order</span><span class="font-bold font-mono">${lastOrder.id}</span></div>
+                            <div class="flex justify-between mb-1"><span class="text-gray-500">Metode</span><span class="font-bold capitalize">${lastOrder.method}</span></div>
+                            <div class="flex justify-between border-t border-gray-200 mt-2 pt-2"><span class="font-bold text-gray-800">Total</span><span class="font-bold text-primary">${formatRupiah(lastOrder.total)}</span></div>
+                        </div>
+                        <button onclick="store.setState({activeModal: null})" class="w-full bg-gray-900 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-black">Tutup</button>
+                    </div>
+                </div>`;
+            }
+
+            return modalContent;
+        };
+
+        // ==========================================
+        // 4. MAIN RENDER LOGIC
+        // ==========================================
+
+        function render() {
+            const root = document.getElementById('root');
+            const state = store.getState();
+            
+            let content = '';
+            
+            // Routing Logic
+            if (!state.user) {
+                content = LoginPage();
+            } else {
+                if (state.user.role === 'customer') {
+                    if (state.view === 'customer_home') content = CustomerHome();
+                    else if (state.view === 'customer_cart') content = CustomerCart();
+                } else if (state.user.role === 'kasir') {
+                    if (state.view === 'pos') content = POSLayout();
+                    else if (state.view === 'dashboard') content = Dashboard();
+                }
+            }
+
+            root.innerHTML = content + Modals();
+            lucide.createIcons();
+        }
+
+        // Event Handlers
+        window.openProduct = (id) => {
+            const product = PRODUCTS.find(p => p.id === id);
+            store.setState({
+                activeModal: 'product',
+                selectedProduct: product,
+                tempConfig: { 
+                    size: product.sizes.length > 0 ? product.sizes[0].name : null, 
+                    addons: [] 
+                }
+            });
+        };
+        window.selectSize = (sizeName) => {
+            store.setState({ tempConfig: { ...store.getState().tempConfig, size: sizeName } });
+        };
+        window.toggleAddon = (id, name, price) => {
+            const currentAddons = store.getState().tempConfig.addons;
+            const exists = currentAddons.find(a => a.id === id);
+            let newAddons = exists ? currentAddons.filter(a => a.id !== id) : [...currentAddons, { id, name, price }];
+            store.setState({ tempConfig: { ...store.getState().tempConfig, addons: newAddons } });
+        };
+        window.openPaymentModal = () => {
+            store.setState({ activeModal: 'payment', paymentMethod: 'cash', cashGiven: 0 });
+        };
+
+        // Init
+        store.subscribe(() => {}); 
+        render();
+
+    </script>
+</body>
+</html>
